@@ -1,97 +1,110 @@
-<?php
-namespace Barryvdh\Elfinder;
+<?php namespace Barryvdh\Elfinder;
 
-use Config;
-use View;
+use Illuminate\Routing\Controller;
+use Illuminate\Foundation\Application;
+use Illuminate\Filesystem\FilesystemAdapter;
 
-class ElfinderController extends \Controller
+class ElfinderController extends Controller
 {
-    protected $package = 'laravel-elfinder';
+    protected $package = 'elfinder';
 
+    /**
+     * The application instance.
+     *
+     * @var \Illuminate\Foundation\Application
+     */
+    protected $app;
+
+    public function __construct(Application $app)
+    {
+        $this->app = $app;
+    }
+        
     public function showIndex()
     {
-        $dir = 'packages/barryvdh/' . $this->package;
-        $locale = Config::get('app.locale');
-        if (!file_exists(public_path() . "/$dir/js/i18n/elfinder.$locale.js"))
-        {
-            $locale = false;
-        }
-        return View::make($this->package . '::elfinder')->with(compact('dir', 'locale'));
+        return $this->app['view']
+            ->make($this->package . '::elfinder')
+            ->with($this->getViewVars());
     }
 
     public function showTinyMCE()
     {
-        $dir = 'packages/barryvdh/' . $this->package;
-        $locale = Config::get('app.locale');
-        
-        if (!file_exists(public_path() . "/$dir/js/i18n/elfinder.$locale.js"))
-        {
-            $locale = false;
-        }
-        return View::make($this->package . '::tinymce')->with(compact('dir', 'locale'));
+        return $this->app['view']
+            ->make($this->package . '::tinymce')
+            ->with($this->getViewVars());
     }
 
     public function showTinyMCE4()
     {
-        $dir = 'packages/barryvdh/' . $this->package;
-        $locale = Config::get('app.locale');
-        $csrf = Config::get($this->package . '::csrf');
-        
-        if (!file_exists(public_path() . "/$dir/js/i18n/elfinder.$locale.js"))
-        {
-            $locale = false;
-        }
-        return View::make($this->package . '::tinymce4')->with(compact('dir', 'locale','csrf'));
+        return $this->app['view']
+            ->make($this->package . '::tinymce4')
+            ->with($this->getViewVars());
     }
 
     public function showCKeditor4()
     {
-        $dir = 'packages/barryvdh/' . $this->package;
-        $locale = Config::get('app.locale');
-        if (!file_exists(public_path() . "/$dir/js/i18n/elfinder.$locale.js"))
-        {
-            $locale = false;
-        }
-        return View::make($this->package . '::ckeditor4')->with(compact('dir', 'locale'));
-    }
-
-    public function showConnector()
-    {
-        $dir = Config::get($this->package . '::dir');
-        $roots = Config::get($this->package . '::roots');
-
-        if (!$roots)
-        {
-            $roots = array(
-                array(
-                    'driver' => 'LocalFileSystem', // driver for accessing file system (REQUIRED)
-                    'path' => public_path() . DIRECTORY_SEPARATOR . $dir, // path to files (REQUIRED)
-                    'URL' => asset($dir), // URL to files (REQUIRED)
-                    'accessControl' => Config::get($this->package . '::access') // filter callback (OPTIONAL)
-                )
-            );
-        }
-
-        // Documentation for connector options:
-        // https://github.com/Studio-42/elFinder/wiki/Connector-configuration-options
-        $opts = array(
-            'roots' => $roots
-        );
-
-        // run elFinder
-        $connector = new \elFinderConnector(new \elFinder($opts));
-        $connector->run();
+        return $this->app['view']
+            ->make($this->package . '::ckeditor4')
+            ->with($this->getViewVars());
     }
 
     public function showPopup($input_id)
     {
-        $dir = 'packages/barryvdh/' . $this->package;
-        $locale = \Config::get('app.locale');
-        if ( ! file_exists(public_path() . "/$dir/js/i18n/elfinder.$locale.js"))
-        {
-            $locale = false;
+        return $this->app['view']
+            ->make($this->package . '::standalonepopup')
+            ->with($this->getViewVars())
+            ->with(compact('input_id'));
+    }
+
+    public function showConnector()
+    {
+        $roots = $this->app->config->get('elfinder.roots', []);
+        if (empty($roots)) {
+            $dirs = (array) $this->app['config']->get('elfinder.dir', []);
+            foreach ($dirs as $dir) {
+                $roots[] = [
+                    'driver' => 'LocalFileSystem', // driver for accessing file system (REQUIRED)
+                    'path' => public_path($dir), // path to files (REQUIRED)
+                    'URL' => url($dir), // URL to files (REQUIRED)
+                    'accessControl' => $this->app->config->get('elfinder.access') // filter callback (OPTIONAL)
+                ];
+            }
+
+            $disks = (array) $this->app['config']->get('elfinder.disks', []);
+            foreach ($disks as $key => $root) {
+                if (is_string($root)) {
+                    $key = $root;
+                    $root = [];
+                }
+                $disk = app('filesystem')->disk($key);
+                if ($disk instanceof FilesystemAdapter) {
+                    $defaults = [
+                        'driver' => 'Flysystem',
+                        'filesystem' => $disk->getDriver(),
+                        'alias' => $key,
+                    ];
+                    $roots[] = array_merge($defaults, $root);
+                }
+            }
         }
 
-        return \View::make($this->package . '::standalonepopup')->with(compact('dir', 'locale', 'input_id'));
+        $opts = $this->app->config->get('elfinder.options', array());
+        $opts = array_merge(['roots' => $roots], $opts);
+
+        // run elFinder
+        $connector = new Connector(new \elFinder($opts));
+        $connector->run();
+        return $connector->getResponse();
+    }
+
+    protected function getViewVars()
+    {
+        $dir = 'packages/barryvdh/' . $this->package;
+        $locale = $this->app->config->get('app.locale');
+        if (!file_exists($this->app['path.public'] . "/$dir/js/i18n/elfinder.$locale.js")) {
+            $locale = false;
+        }
+        $csrf = true;
+        return compact('dir', 'locale', 'csrf');
     }
 }

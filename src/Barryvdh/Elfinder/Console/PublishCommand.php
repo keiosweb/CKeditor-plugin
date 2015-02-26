@@ -1,7 +1,8 @@
 <?php
 namespace Barryvdh\Elfinder\Console;
-use Illuminate\Foundation\AssetPublisher;
+
 use Illuminate\Console\Command;
+use Illuminate\Filesystem\Filesystem;
 
 /**
  * Publish the elFinder assets to the public directory
@@ -24,23 +25,23 @@ class PublishCommand extends Command {
      */
     protected $description = 'Publish the elFinder assets';
 
-    /**
-     * The asset publisher instance.
-     *
-     * @var \Illuminate\Foundation\AssetPublisher
-     */
-    protected $assets;
+    /** @var Filesystem $fs */
+    protected $files;
+
+    protected $publishPath;
 
     /**
      * Create a new Publish command
      *
-     * @param \Illuminate\Foundation\AssetPublisher $assets
+     * @param \Illuminate\Filesystem\Filesystem $files
+     * @param string $publishPath
      */
-    public function __construct(AssetPublisher $assets)
+    public function __construct($files, $publishPath)
     {
         parent::__construct();
 
-        $this->assets = $assets;
+        $this->files = $files;
+        $this->publishPath = $publishPath;
     }
 
     /**
@@ -51,27 +52,70 @@ class PublishCommand extends Command {
     public function fire()
     {
 
-        $package = 'barryvdh/laravel-elfinder';
-        if ( ! is_null($path = $this->getPath()))
-        {
-            $this->assets->publish($package, $path);
-            $this->info('Assets published for package: '.$package);
+        $package = 'barryvdh/elfinder';
+        $destination = $this->publishPath . "/packages/{$package}";
+
+        if ( ! is_null($path = $this->getElfinderPath())) {
+            if ($this->files->exists($destination)) {
+                $this->files->deleteDirectory($destination);
+                $this->info('Old published Assets have been removed');
+            }
+            $copyElfinder = $this->copyElfinderFiles($destination);
+        } else {
+            $copyElfinder = false;
+            $this->error('Could not find elfinder path');
         }
-        else
-        {
-            $this->error('Could not find path for: '.$package);
+
+        if ( ! is_null($path = $this->getPath())) {
+            $copyPublic = $this->files->copyDirectory($path, $destination);
+        } else {
+            $copyPublic = false;
+            $this->error('Could not find public path');
+        }
+
+        if ($copyElfinder && $copyPublic) {
+            $this->info('Published assets to: '.$package);
+        } else {
+            $this->error('Could not publish alles assets for '.$package);
         }
 
     }
 
     /**
-     * Get the path of the assets folder. For now it's just vendor/barryvdh/laravel-elfinder/public,
-     * but in the future could reference to a different composer package.
+     * Copy specific directories from elFinder to their destination
+     *
+     * @param $destination
+     * @return bool
      */
-    protected function getPath(){
-        $path = with(new \ReflectionClass($this))->getFileName();
-        return realpath(dirname($path).'/../../../../public');
+    protected function copyElfinderFiles($destination)
+    {
+        $result = true;
+        $directories = array('js', 'css', 'img');
+        $elfinderPath = $this->getElfinderPath();
+        foreach($directories as $dir){
+            $path = $elfinderPath.'/'.$dir;
+            $success = $this->files->copyDirectory($path, $destination.'/'.$dir);
+            $result = $success && $result;
+        }
+        return $result;
     }
 
+    /**
+     *  Get the path of the public folder, to merge with the elFinder folders.
+     */
+    protected function getPath(){
+        return __DIR__ .'/../../resources/assets';
+    }
+
+    /**
+     * Find the elFinder path from the vendor dir.
+     *
+     * @return string
+     */
+    protected function getElfinderPath()
+    {
+        $reflector = new \ReflectionClass('elFinder');
+        return realpath(dirname($reflector->getFileName()) . '/..');
+    }
 
 }
